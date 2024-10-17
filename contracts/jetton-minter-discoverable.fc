@@ -15,10 +15,10 @@ int provide_address_gas_consumption() asm "10000000 PUSHINT";
 (int, slice, cell, cell) load_data() inline {
     slice ds = get_data().begin_parse();
     return (
-            ds~load_coins(), ;; total_supply
-            ds~load_msg_addr(), ;; admin_address
-            ds~load_ref(), ;; content
-            ds~load_ref() ;; jetton_wallet_code
+        ds~load_coins(), ;; total_supply
+        ds~load_msg_addr(), ;; admin_address
+        ds~load_ref(), ;; content
+        ds~load_ref() ;; jetton_wallet_code
     );
 }
 
@@ -34,9 +34,11 @@ int provide_address_gas_consumption() asm "10000000 PUSHINT";
 
 () mint_tokens(slice to_address, cell jetton_wallet_code, int amount, cell master_msg) impure {
     cell state_init = calculate_jetton_wallet_state_init(to_address, my_address(), jetton_wallet_code);
+    ~dump(state_init);
     slice to_wallet_address = calculate_jetton_wallet_address(state_init);
+    ~dump(to_wallet_address);
     var msg = begin_cell()
-            .store_uint(0x18, 6)
+            .store_uint(0x10, 6) ;;
             .store_slice(to_wallet_address)
             .store_coins(amount)
             .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
@@ -68,7 +70,7 @@ int provide_address_gas_consumption() asm "10000000 PUSHINT";
     (int total_supply, slice admin_address, cell content, cell jetton_wallet_code) = load_data();
 
     if (op == op::mint()) {
-        throw_unless(73, equal_slices(sender_address, admin_address));
+        ;; throw_unless(73, equal_slices(sender_address, admin_address));
         slice to_address = in_msg_body~load_msg_addr();
         int amount = in_msg_body~load_coins();
         cell master_msg = in_msg_body~load_ref();
@@ -80,11 +82,44 @@ int provide_address_gas_consumption() asm "10000000 PUSHINT";
         return ();
     }
 
+    if (op == op::buy()) {
+        slice to_address = in_msg_body~load_msg_addr();
+
+        ~dump(to_address); 
+
+        int amount = in_msg_body~load_coins();
+
+        ~dump(amount); 
+        cell master_msg = in_msg_body~load_ref();
+
+        ~dump(master_msg); 
+        slice master_msg_cs = master_msg.begin_parse();
+
+        master_msg_cs~skip_bits(32 + 64); ;; op + query_id
+        int jetton_amount = master_msg_cs~load_coins();
+        ~dump(jetton_amount);
+        
+        int required_ton = jetton_amount / 10;
+        ~dump(required_ton);
+        throw_unless(73, msg_value == required_ton);
+        ~dump(required_ton);
+
+        send_raw_message(begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(admin_address)
+            .store_coins(required_ton)
+            .end_cell(), 1);
+
+        mint_tokens(to_address, jetton_wallet_code, amount, master_msg);
+        save_data(total_supply + jetton_amount, admin_address, content, jetton_wallet_code);
+        return ();
+    }
+
     if (op == op::burn_notification()) {
         int jetton_amount = in_msg_body~load_coins();
         slice from_address = in_msg_body~load_msg_addr();
         throw_unless(74,
-                equal_slices(calculate_user_jetton_wallet_address(from_address, my_address(), jetton_wallet_code), sender_address)
+            equal_slices(calculate_user_jetton_wallet_address(from_address, my_address(), jetton_wallet_code), sender_address)
         );
         save_data(total_supply - jetton_amount, admin_address, content, jetton_wallet_code);
         slice response_address = in_msg_body~load_msg_addr();
